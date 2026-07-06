@@ -1,0 +1,6 @@
+bin/
+Output/
+staging/
+vspkg/
+
+test.txt

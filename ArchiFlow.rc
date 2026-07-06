@@ -1,0 +1,162 @@
+// ArchiFlow.rc - Resource file
+#include <windows.h>
+#include "Resource.h"
+
+// Icons
+IDI_MAIN_ICON           ICON    "resources\\archiflow.ico"
+IDI_SMALL_ICON          ICON    "resources\\archiflow_small.ico"
+IDI_ARCHIVE_ICON        ICON    "resources\\archive.ico"
+IDI_EXTRACT_ICON        ICON    "resources\\extract.ico"
+
+// Bitmaps
+IDB_LOGO                BITMAP  "resources\\logo.bmp"
+
+// String Table
+STRINGTABLE
+BEGIN
+    IDS_APP_TITLE       "ArchiFlow - Архиватор"
+    IDS_FILE_MENU       "Файл"
+    IDS_NEW_ARCHIVE     "Новый архив"
+    IDS_OPEN_ARCHIVE    "Открыть архив"
+    IDS_ADD_FILES       "Добавить файлы"
+    IDS_EXTRACT_ALL     "Извлечь все"
+    IDS_SETTINGS        "Настройки"
+    IDS_EXIT            "Выход"
+    IDS_HELP_MENU       "Справка"
+    IDS_ABOUT           "О программе"
+    IDS_LANGUAGE_MENU   "Язык"
+    IDS_RUSSIAN         "Русский"
+    IDS_ENGLISH         "Английский"
+END
+
+// Archive Creation Dialog
+IDD_ARCHIVE_DIALOG DIALOGEX 0, 0, 400, 300
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Добавить в архив"
+FONT 8, "Segoe UI", 400, 0, 0x1
+BEGIN
+    GROUPBOX        "Формат архива", -1, 10, 10, 180, 50
+    COMBOBOX        IDC_FORMAT_COMBO, 20, 30, 160, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    
+    GROUPBOX        "Уровень сжатия", -1, 200, 10, 190, 50
+    COMBOBOX        IDC_LEVEL_COMBO, 210, 30, 170, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    
+    GROUPBOX        "Параметры сохранения", -1, 10, 70, 380, 50
+    EDITTEXT        IDC_OUTPUT_PATH, 20, 88, 300, 14, ES_AUTOHSCROLL
+    PUSHBUTTON      "Обзор", IDC_BROWSE_BUTTON, 330, 87, 50, 16
+    
+    GROUPBOX        "Защита", -1, 10, 130, 380, 50
+    CONTROL         "Шифровать архив", IDC_ENCRYPT_CHECK, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 148, 100, 14
+    EDITTEXT        IDC_PASSWORD_EDIT, 130, 147, 150, 14, ES_PASSWORD | ES_AUTOHSCROLL
+    
+    GROUPBOX        "Дополнительно", -1, 10, 190, 380, 50
+    LTEXT           "Размер тома (МБ):", -1, 20, 210, 80, 14
+    EDITTEXT        IDC_SPLIT_SIZE, 105, 208, 60, 14, ES_NUMBER
+    
+    DEFPUSHBUTTON   "Добавить в архив", IDC_ADD_BUTTON, 200, 260, 90, 25
+    PUSHBUTTON      "Отмена", IDCANCEL, 300, 260, 90, 25
+END
+
+// Extract Dialog
+IDD_EXTRACT_DIALOG DIALOGEX 0, 0, 400, 200
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Извлечь из архива"
+FONT 8, "Segoe UI", 400, 0, 0x1
+BEGIN
+    GROUPBOX        "Путь для извлечения", -1, 10, 10, 380, 50
+    EDITTEXT        IDC_OUTPUT_PATH, 20, 28, 300, 14, ES_AUTOHSCROLL
+    PUSHBUTTON      "Обзор", IDC_BROWSE_BUTTON, 330, 27, 50, 16
+    
+    GROUPBOX        "Пароль (если требуется)", -1, 10, 70, 380, 50
+    EDITTEXT        IDC_PASSWORD_EDIT, 20, 88, 200, 14, ES_PASSWORD | ES_AUTOHSCROLL
+    
+    CONTROL         "Извлечь с путями", -1, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 115, 100, 14
+    CONTROL         "Перезаписывать файлы", -1, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 135, 120, 14
+    
+    DEFPUSHBUTTON   "Извлечь", IDC_EXTRACT_BUTTON, 200, 165, 90, 25
+    PUSHBUTTON      "Отмена", IDCANCEL, 300, 165, 90, 25
+END
+
+// Progress Dialog
+IDD_PROGRESS_DIALOG DIALOGEX 0, 0, 300, 120
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION
+CAPTION "Прогресс"
+FONT 8, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT           "Выполняется операция...", IDC_STATUS_TEXT, 10, 10, 280, 20
+    CONTROL         "", IDC_PROGRESS_BAR, "msctls_progress32", PBS_SMOOTH, 10, 40, 280, 20
+    LTEXT           "Пожалуйста, подождите...", -1, 10, 70, 280, 20
+    PUSHBUTTON      "Отмена", IDCANCEL, 110, 95, 80, 20
+END
+
+// Settings Dialog
+IDD_SETTINGS_DIALOG DIALOGEX 0, 0, 350, 250
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Настройки"
+FONT 8, "Segoe UI", 400, 0, 0x1
+BEGIN
+    GROUPBOX        "Общие настройки", -1, 10, 10, 330, 60
+    CONTROL         "Интеграция в контекстное меню", -1, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 30, 200, 14
+    CONTROL         "Ассоциировать форматы архивов", -1, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 20, 50, 200, 14
+    
+    GROUPBOX        "Настройки сжатия", -1, 10, 80, 330, 80
+    LTEXT           "Формат по умолчанию:", -1, 20, 100, 100, 14
+    COMBOBOX        IDC_FORMAT_COMBO, 130, 98, 100, 100, CBS_DROPDOWNLIST | WS_VSCROLL
+    LTEXT           "Уровень сжатия:", -1, 20, 125, 100, 14
+    COMBOBOX        IDC_LEVEL_COMBO, 130, 123, 100, 100, CBS_DROPDOWNLIST | WS_VSCROLL
+    
+    GROUPBOX        "Язык интерфейса", -1, 10, 170, 330, 50
+    CONTROL         "Русский", IDC_RADIO_RU, "Button", BS_AUTORADIOBUTTON, 20, 192, 80, 14
+    CONTROL         "English", IDC_RADIO_EN, "Button", BS_AUTORADIOBUTTON, 120, 192, 80, 14
+    
+    DEFPUSHBUTTON   "OK", IDOK, 150, 225, 90, 20
+    PUSHBUTTON      "Отмена", IDCANCEL, 250, 225, 90, 20
+END
+
+// About Dialog
+IDD_ABOUT_DIALOG DIALOGEX 0, 0, 300, 200
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "О программе"
+FONT 8, "Segoe UI", 400, 0, 0x1
+BEGIN
+    ICON            IDI_MAIN_ICON, -1, 130, 10, 32, 32
+    LTEXT           "ArchiFlow v1.0", -1, 100, 50, 100, 20, SS_CENTER
+    LTEXT           "Легкий архиватор", -1, 100, 70, 100, 20, SS_CENTER
+    LTEXT           "Поддерживаемые форматы:", -1, 10, 100, 280, 20
+    LTEXT           "ZIP, 7Z, RAR, TAR, GZIP, BZIP2", -1, 10, 120, 280, 20
+    LTEXT           "Copyright 2024", -1, 100, 150, 100, 20, SS_CENTER
+    DEFPUSHBUTTON   "OK", IDOK, 120, 175, 60, 20
+END
+
+// Version Information
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     1,0,0,0
+PRODUCTVERSION  1,0,0,0
+FILEFLAGSMASK   0x3fL
+FILEFLAGS       0x0L
+FILEOS          0x40004L
+FILETYPE        0x1L
+FILESUBTYPE     0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "ArchiFlow Software"
+            VALUE "FileDescription", "ArchiFlow - Легкий архиватор"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "ArchiFlow"
+            VALUE "LegalCopyright", "Copyright 2024"
+            VALUE "OriginalFilename", "ArchiFlow.exe"
+            VALUE "ProductName", "ArchiFlow"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+// Manifest
+1 RT_MANIFEST "resources\\archiflow.exe.manifest"
