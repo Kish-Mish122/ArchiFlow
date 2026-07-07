@@ -12,6 +12,7 @@
 #include <map>
 #include <cstring>
 #include <cstdio>
+#include <functional>
 #include <sys/stat.h>
 
 #include <archive.h>
@@ -155,7 +156,7 @@ std::wstring getFileType(const std::wstring& name) {
     if (pos == std::wstring::npos) return L"Файл";
     std::wstring ext = name.substr(pos + 1);
     for (auto& c : ext) c = towlower(c);
-    if (ext == L"txt") return L"Текстовый документ";
+    if (ext == L"txt" || ext == L"rtf") return L"Текстовый документ";
     if (ext == L"pdf") return L"PDF документ";
     if (ext == L"jpg" || ext == L"jpeg") return L"Изображение JPEG";
     if (ext == L"png") return L"Изображение PNG";
@@ -163,6 +164,22 @@ std::wstring getFileType(const std::wstring& name) {
     if (ext == L"exe") return L"Приложение";
     if (ext == L"dll") return L"Библиотека";
     if (ext == L"cpp" || ext == L"h") return L"Исходный код C++";
+    if (ext == L"cs") return L"Исходный код C#";
+    if (ext == L"unity") return L"Сцена Unity";
+    if (ext == L"res") return L"Файл-Рессурс";
+    if (ext == L"trash") return L"Файл-Мусор";
+    if (ext == L"doc") return L"Формат документов DOC";
+    if (ext == L"dotx") return L"Шаблон документа";
+    if (ext == L"docm") return L"Документ со встроенными макросами";
+    if (ext == L"docx") return L"Документ Mircosoft Word";
+    if (ext == L"pdf") return L"PDF-файл";
+    if (ext == L"md") return L"Файл-Markdown";
+    if (ext == L"bat") return L"Консольное приложение";
+    if (ext == L"py") return L"Python-Файл";
+    if (ext == L"exe") return L"Исполняемый файл Windows";
+    if (ext == L"sh") return L"Сценарий Unix-OS";
+    if (ext == L"rc") return L"Resource Script";
+    if (ext == L"iss") return L"Inno Setup";
     return L"Файл " + ext;
 }
 
@@ -172,21 +189,27 @@ bool loadArchiveContents(const std::wstring& archivePath) {
     struct archive* a = archive_read_new();
     if (!a) return false;
     
-    archive_read_support_format_zip(a);
-    archive_read_support_format_7zip(a);
-    archive_read_support_format_rar(a);
-    archive_read_support_format_tar(a);
+    archive_read_support_format_all(a);
+    archive_read_support_filter_all(a);
     
     std::string ap(archivePath.begin(), archivePath.end());
     
     int r = archive_read_open_filename(a, ap.c_str(), 10240);
     if (r != ARCHIVE_OK) {
+        WCHAR msg[512];
+        swprintf(msg, 512, L"Ошибка открытия архива:\n%s\n\nКод: %d\n%s", 
+            archivePath.c_str(), r, 
+            archive_error_string(a) ? 
+                std::wstring(archive_error_string(a), archive_error_string(a) + strlen(archive_error_string(a))).c_str() 
+                : L"нет описания");
+        MessageBoxW(NULL, msg, L"Ошибка", MB_OK);
         archive_read_free(a);
         return false;
     }
     
     archiveFiles.clear();
     struct archive_entry* entry;
+    int fileCount = 0;
     
     while (true) {
         r = archive_read_next_header(a, &entry);
@@ -210,10 +233,17 @@ bool loadArchiveContents(const std::wstring& archivePath) {
         info.mtime = archive_entry_mtime(entry);
         info.type = getFileType(info.name);
         archiveFiles.push_back(info);
+        fileCount++;
     }
     
     archive_read_close(a);
     archive_read_free(a);
+    
+    WCHAR msg[256];
+    swprintf(msg, 256, L"Загружено файлов: %d", fileCount);
+    // Закомментируйте эту строку после проверки:
+    // MessageBoxW(NULL, msg, L"Отладка", MB_OK);
+    
     return true;
 }
 
@@ -251,48 +281,6 @@ void refreshFileList() {
     WCHAR statusText[256];
     swprintf(statusText, 256, L"%zu %s", archiveFiles.size(), ls(L"filesInArchive").c_str());
     SendMessageW(hStatusBar, SB_SETTEXT, 0, (LPARAM)statusText);
-}
-
-bool createZipArchive(const std::wstring& zipFile, const std::vector<std::wstring>& files) {
-    struct archive* a = archive_write_new();
-    archive_write_set_format_zip(a);
-    
-    std::string zf(zipFile.begin(), zipFile.end());
-    if (archive_write_open_filename(a, zf.c_str()) != ARCHIVE_OK) {
-        archive_write_free(a);
-        return false;
-    }
-    
-    for (const auto& f : files) {
-        struct archive* disk = archive_read_disk_new();
-        archive_read_disk_set_standard_lookup(disk);
-        
-        struct archive_entry* entry = archive_entry_new();
-        std::string fs(f.begin(), f.end());
-        
-        size_t pos = f.find_last_of(L"\\/");
-        std::wstring name = (pos != std::wstring::npos) ? f.substr(pos + 1) : f;
-        std::string ns(name.begin(), name.end());
-        
-        archive_entry_copy_pathname(entry, ns.c_str());
-        archive_read_disk_entry_from_file(disk, entry, -1, 0);
-        archive_write_header(a, entry);
-        
-        std::ifstream in(fs, std::ios::binary);
-        if (in) {
-            char buf[8192];
-            while (in.read(buf, sizeof(buf)) || in.gcount() > 0) {
-                archive_write_data(a, buf, in.gcount());
-            }
-        }
-        
-        archive_entry_free(entry);
-        archive_read_free(disk);
-    }
-    
-    archive_write_close(a);
-    archive_write_free(a);
-    return true;
 }
 
 bool extractZipArchive(const std::wstring& zipFile, const std::wstring& outDir,
@@ -520,6 +508,207 @@ void updateUI() {
     ListView_SetColumn(hListView, 5, &lvc);
 }
 
+// Добавление файлов в существующий архив
+bool addFilesToExistingArchive(const std::wstring& zipPath, const std::vector<std::wstring>& newFiles) {
+    WCHAR tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    std::wstring tempDir = std::wstring(tempPath) + L"ArchiFlow_Add\\";
+    CreateDirectoryW(tempDir.c_str(), NULL);
+
+    struct archive* a = archive_read_new();
+    archive_read_support_format_all(a);
+    archive_read_support_filter_all(a);
+
+    std::string ap(zipPath.begin(), zipPath.end());
+    if (archive_read_open_filename(a, ap.c_str(), 10240) != ARCHIVE_OK) {
+        archive_read_free(a);
+        RemoveDirectoryW(tempDir.c_str());
+        return false;
+    }
+
+    struct archive* ext = archive_write_disk_new();
+    archive_write_disk_set_options(ext, ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL);
+    archive_write_disk_set_standard_lookup(ext);
+
+    struct archive_entry* entry;
+    while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+        const char* pathname = archive_entry_pathname(entry);
+        if (!pathname) continue;
+
+        // Приводим путь к Windows (обратные слеши)
+        std::string cleanPath = pathname;
+        for (char& c : cleanPath) if (c == '/') c = '\\';
+
+        std::string fullPath = std::string(tempDir.begin(), tempDir.end()) + cleanPath;
+        archive_entry_set_pathname(entry, fullPath.c_str());
+
+        // Создаём подпапки при необходимости
+        std::string dirPart = fullPath.substr(0, fullPath.find_last_of('\\'));
+        if (!dirPart.empty()) {
+            std::wstring wdir(dirPart.begin(), dirPart.end());
+            SHCreateDirectoryExW(NULL, wdir.c_str(), NULL);
+        }
+
+        archive_write_header(ext, entry);
+        const void* buff;
+        size_t size;
+        la_int64_t offset;
+        while (archive_read_data_block(a, &buff, &size, &offset) == ARCHIVE_OK)
+            archive_write_data_block(ext, buff, size, offset);
+    }
+
+    archive_read_close(a);
+    archive_read_free(a);
+    archive_write_close(ext);
+    archive_write_free(ext);
+
+    for (const auto& f : newFiles) {
+        DWORD attrs = GetFileAttributesW(f.c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        size_t pos = f.find_last_of(L"\\/");
+        std::wstring name = (pos != std::wstring::npos) ? f.substr(pos + 1) : f;
+        CopyFileW(f.c_str(), (tempDir + name).c_str(), FALSE);
+    }
+
+    std::vector<std::wstring> allFiles, relativePaths;
+
+    std::function<void(const std::wstring&)> collect = [&](const std::wstring& dir) {
+        WIN32_FIND_DATAW fd;
+        HANDLE hFind = FindFirstFileW((dir + L"*").c_str(), &fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+                std::wstring full = dir + fd.cFileName;
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                    collect(full + L"\\");
+                } else {
+                    allFiles.push_back(full);
+                    std::wstring rel = full.substr(tempDir.length());
+                    while (!rel.empty() && (rel[0] == L'\\' || rel[0] == L'/')) rel = rel.substr(1);
+                    relativePaths.push_back(rel);
+                }
+            } while (FindNextFileW(hFind, &fd));
+            FindClose(hFind);
+        }
+    };
+    collect(tempDir);
+
+    if (allFiles.empty()) {
+        RemoveDirectoryW(tempDir.c_str());
+        return false;
+    }
+
+    DeleteFileW(zipPath.c_str());
+
+    struct archive* out = archive_write_new();
+    archive_write_set_format_zip(out);
+
+    std::string outPath(zipPath.begin(), zipPath.end());
+    if (archive_write_open_filename(out, outPath.c_str()) != ARCHIVE_OK) {
+        archive_write_free(out);
+        return false;
+    }
+
+    for (size_t i = 0; i < allFiles.size(); ++i) {
+        struct archive* disk = archive_read_disk_new();
+        archive_read_disk_set_standard_lookup(disk);
+        struct archive_entry* newEntry = archive_entry_new();
+
+        std::string fs(allFiles[i].begin(), allFiles[i].end());
+        std::string rel(relativePaths[i].begin(), relativePaths[i].end());
+        for (char& c : rel) if (c == '\\') c = '/';   // в ZIP используем прямые слеши
+
+        archive_entry_copy_pathname(newEntry, rel.c_str());
+        archive_read_disk_entry_from_file(disk, newEntry, -1, 0);
+        archive_write_header(out, newEntry);
+
+        std::ifstream in(fs, std::ios::binary);
+        if (in) {
+            char buf[8192];
+            while (in.read(buf, sizeof(buf)) || in.gcount() > 0)
+                archive_write_data(out, buf, in.gcount());
+        }
+
+        archive_entry_free(newEntry);
+        archive_read_free(disk);
+    }
+
+    archive_write_close(out);
+    archive_write_free(out);
+
+    std::function<void(const std::wstring&)> removeDir = [&](const std::wstring& dir) {
+        WIN32_FIND_DATAW fd;
+        HANDLE hFind = FindFirstFileW((dir + L"*").c_str(), &fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+                std::wstring full = dir + fd.cFileName;
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                    removeDir(full + L"\\");
+                } else {
+                    SetFileAttributesW(full.c_str(), FILE_ATTRIBUTE_NORMAL);
+                    DeleteFileW(full.c_str());
+                }
+            } while (FindNextFileW(hFind, &fd));
+            FindClose(hFind);
+        }
+        RemoveDirectoryW(dir.c_str());
+    };
+    removeDir(tempDir);
+
+    return true;
+}
+
+bool createZipArchive(const std::wstring& zipFile, const std::vector<std::wstring>& files) {
+    if (files.empty()) return false;
+    
+    DeleteFileW(zipFile.c_str());
+    
+    struct archive* a = archive_write_new();
+    archive_write_set_format_zip(a);
+    
+    std::string zf(zipFile.begin(), zipFile.end());
+    if (archive_write_open_filename(a, zf.c_str()) != ARCHIVE_OK) {
+        archive_write_free(a);
+        return false;
+    }
+    
+    for (const auto& f : files) {
+        DWORD attrs = GetFileAttributesW(f.c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        
+        struct archive* disk = archive_read_disk_new();
+        archive_read_disk_set_standard_lookup(disk);
+        
+        struct archive_entry* entry = archive_entry_new();
+        std::string fs(f.begin(), f.end());
+        
+        // Только имя файла
+        size_t pos = f.find_last_of(L"\\/");
+        std::wstring name = (pos != std::wstring::npos) ? f.substr(pos + 1) : f;
+        std::string ns(name.begin(), name.end());
+        
+        archive_entry_copy_pathname(entry, ns.c_str());
+        archive_read_disk_entry_from_file(disk, entry, -1, 0);
+        archive_write_header(a, entry);
+        
+        std::ifstream in(fs, std::ios::binary);
+        if (in) {
+            char buf[8192];
+            while (in.read(buf, sizeof(buf)) || in.gcount() > 0) {
+                archive_write_data(a, buf, in.gcount());
+            }
+        }
+        
+        archive_entry_free(entry);
+        archive_read_free(disk);
+    }
+    
+    archive_write_close(a);
+    archive_write_free(a);
+    return true;
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CREATE:
@@ -618,17 +807,32 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 
                 case IDC_ADD_BTN: {
                     if (archiveLoaded) {
-                        MessageBoxW(hwnd, L"Добавление в существующий архив в разработке.", L"ArchiFlow", MB_OK);
-                    } else {
-                        std::wstring zip = saveZipDialog(hwnd);
-                        if (!zip.empty()) {
+                        // Проверяем, наш ли это архив (простой признак – отсутствие подпапок в корне)
+                        bool hasSubdirs = false;
+                        for (const auto& f : archiveFiles) {
+                            if (f.name.find(L'/') != std::wstring::npos || f.name.find(L'\\') != std::wstring::npos) {
+                                hasSubdirs = true;
+                                break;
+                            }
+                        }
+                        if (hasSubdirs) {
+                            MessageBoxW(hwnd, L"Добавление файлов в этот архив недоступно.\n"
+                                            L"Архив содержит вложенные папки или создан другой программой.\n"
+                                            L"Рекомендуется извлечь архив, добавить файлы и создать новый.\n"
+                                            L"Звучит как анегдот, но, пока что, это лучшее решение для ArchiFlow!",
+                                            L"ArchiFlow", MB_OK | MB_ICONINFORMATION);
+                        } else {
                             auto files = openFilesDialog(hwnd);
-                            if (!files.empty() && createZipArchive(zip, files)) {
-                                currentArchivePath = zip;
-                                archiveLoaded = true;
-                                loadArchiveContents(zip);
-                                refreshFileList();
-                                SetWindowTextW(hwnd, (L"ArchiFlow - " + currentArchivePath).c_str());
+                            if (!files.empty()) {
+                                HCURSOR oldCursor = SetCursor(LoadCursor(NULL, IDC_WAIT));
+                                if (addFilesToExistingArchive(currentArchivePath, files)) {
+                                    loadArchiveContents(currentArchivePath);
+                                    refreshFileList();
+                                    MessageBoxW(hwnd, L"Файлы добавлены!", L"ArchiFlow", MB_OK);
+                                } else {
+                                    MessageBoxW(hwnd, L"Ошибка при добавлении файлов!", L"ArchiFlow", MB_OK | MB_ICONERROR);
+                                }
+                                SetCursor(oldCursor);
                             }
                         }
                     }
