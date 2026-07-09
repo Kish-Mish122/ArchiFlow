@@ -59,14 +59,4 @@ ArchiFlow - это современный, легкий архиватор дл�
 5. Соберите проект
 
 ## Лицензия
-Copyright (c) 2024 ArchiFlow Software. Все права защищены.
-
-## Поддержка
-- Веб-сайт: https://www.archiflow.com
-- Email: support@archiflow.com
-- Форум: https://forum.archiflow.com
-
-## Благодарности
-- libarchive project
-- Inno Setup
-- Visual Studio Community
+MIT
