@@ -1,0 +1,8 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\ArchiFlowCreateArchive]
+@="Create archive with ArchiFlow"
+"Icon"="\"E:\\ArchiFlow\\bin\\ArchiFlow\\ArchiFlow.exe\""
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\ArchiFlowCreateArchive\command]
+@="\"E:\\ArchiFlow\\bin\\ArchiFlow\\ArchiFlow.exe\""

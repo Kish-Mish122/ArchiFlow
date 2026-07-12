@@ -9,11 +9,19 @@
 #include <string>
 #include <vector>
 #include <fstream>
-#include <map>
+#include <unordered_map>
 #include <cstring>
 #include <cstdio>
 #include <functional>
 #include <sys/stat.h>
+#include <algorithm>
+#include <exception>
+#include <stack>
+#include <mutex>
+
+#pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "shell32.lib")
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -33,6 +41,7 @@
 #define IDC_EXTRACT_BTN     1002
 #define IDC_ADD_BTN         1003
 #define IDC_DELETE_BTN      1004
+#define IDC_OPEN_BTN        1006
 #define IDC_STATUS_BAR      1005
 
 #define IDM_NEW_ARCHIVE     40001
@@ -54,7 +63,7 @@ struct LocStrings {
     std::wstring nameCol, sizeCol, packedCol, ratioCol, dateCol, typeCol;
 };
 
-std::map<AppLanguage, LocStrings> loc;
+std::unordered_map<AppLanguage, LocStrings> loc;
 AppLanguage curLang = APP_LANG_RUSSIAN;
 
 void initLoc() {
@@ -85,57 +94,151 @@ void initLoc() {
 }
 
 const std::wstring& ls(const std::wstring& key) {
+    static std::unordered_map<std::wstring, std::wstring> cache;
+    static AppLanguage lastLang = static_cast<AppLanguage>(-1);
+    
+    if (curLang != lastLang) {
+        cache.clear();
+        lastLang = curLang;
+    }
+    
+    auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
+    
     auto& l = loc[curLang];
-    if (key == L"title") return l.title;
-    if (key == L"file") return l.file;
-    if (key == L"newarc") return l.newarc;
-    if (key == L"openarc") return l.openarc;
-    if (key == L"add") return l.add;
-    if (key == L"extract") return l.extract;
-    if (key == L"extractAll") return l.extractAll;
-    if (key == L"extractSel") return l.extractSel;
-    if (key == L"deleteSel") return l.deleteSel;
-    if (key == L"exit") return l.exit;
-    if (key == L"help") return l.help;
-    if (key == L"about") return l.about;
-    if (key == L"lang") return l.lang;
-    if (key == L"ru") return l.ru;
-    if (key == L"en") return l.en;
-    if (key == L"selArc") return l.selArc;
-    if (key == L"selFiles") return l.selFiles;
-    if (key == L"selFolder") return l.selFolder;
-    if (key == L"done") return l.done;
-    if (key == L"err") return l.err;
-    if (key == L"ready") return l.ready;
-    if (key == L"opening") return l.opening;
-    if (key == L"filesInArchive") return l.filesInArchive;
-    if (key == L"nameCol") return l.nameCol;
-    if (key == L"sizeCol") return l.sizeCol;
-    if (key == L"packedCol") return l.packedCol;
-    if (key == L"ratioCol") return l.ratioCol;
-    if (key == L"dateCol") return l.dateCol;
-    if (key == L"typeCol") return l.typeCol;
-    static std::wstring empty;
-    return empty;
+    std::wstring value;
+    if (key == L"title") value = l.title;
+    else if (key == L"file") value = l.file;
+    else if (key == L"newarc") value = l.newarc;
+    else if (key == L"openarc") value = l.openarc;
+    else if (key == L"add") value = l.add;
+    else if (key == L"extract") value = l.extract;
+    else if (key == L"extractAll") value = l.extractAll;
+    else if (key == L"extractSel") value = l.extractSel;
+    else if (key == L"deleteSel") value = l.deleteSel;
+    else if (key == L"exit") value = l.exit;
+    else if (key == L"help") value = l.help;
+    else if (key == L"about") value = l.about;
+    else if (key == L"lang") value = l.lang;
+    else if (key == L"ru") value = l.ru;
+    else if (key == L"en") value = l.en;
+    else if (key == L"selArc") value = l.selArc;
+    else if (key == L"selFiles") value = l.selFiles;
+    else if (key == L"selFolder") value = l.selFolder;
+    else if (key == L"done") value = l.done;
+    else if (key == L"err") value = l.err;
+    else if (key == L"ready") value = l.ready;
+    else if (key == L"opening") value = l.opening;
+    else if (key == L"filesInArchive") value = l.filesInArchive;
+    else if (key == L"nameCol") value = l.nameCol;
+    else if (key == L"sizeCol") value = l.sizeCol;
+    else if (key == L"packedCol") value = l.packedCol;
+    else if (key == L"ratioCol") value = l.ratioCol;
+    else if (key == L"dateCol") value = l.dateCol;
+    else if (key == L"typeCol") value = l.typeCol;
+    else value = L"";
+    
+    cache[key] = value;
+    return cache[key];
 }
-
-HINSTANCE hInst;
-HWND hMainWnd, hListView, hStatusBar, hAddBtn, hExtractBtn, hDeleteBtn;
-std::wstring currentArchivePath;
-bool archiveLoaded = false;
 
 struct ArchiveFileInfo {
     std::wstring name;
-    uint64_t size;
-    uint64_t packedSize;
-    time_t mtime;
+    uint64_t size = 0;
+    uint64_t packedSize = 0;
+    time_t mtime = 0;
     std::wstring type;
 };
 
-std::vector<ArchiveFileInfo> archiveFiles;
+struct ApplicationState {
+    HINSTANCE hInst = nullptr;
+    HWND hMainWnd = nullptr, hListView = nullptr, hStatusBar = nullptr;
+    HWND hAddBtn = nullptr, hExtractBtn = nullptr, hDeleteBtn = nullptr, hOpenBtn = nullptr;
+    std::wstring currentArchivePath;
+    bool archiveLoaded = false;
+    std::vector<ArchiveFileInfo> archiveFiles;
+};
+
+ApplicationState app;
+
+bool loadArchiveContents(const std::wstring& archivePath);
+void refreshFileList();
+
+void WriteCrashDump(const std::wstring& reason, const std::wstring& modulePath, struct _EXCEPTION_POINTERS* ExceptionInfo = NULL);
+
+LONG WINAPI CrashHandler(struct _EXCEPTION_POINTERS* ExceptionInfo) {
+    WCHAR modulePath[MAX_PATH];
+    GetModuleFileNameW(NULL, modulePath, MAX_PATH);
+    
+    std::wstring reason;
+    switch (ExceptionInfo->ExceptionRecord->ExceptionCode) {
+        case EXCEPTION_ACCESS_VIOLATION: reason = L"EXCEPTION_ACCESS_VIOLATION"; break;
+        case EXCEPTION_ARRAY_BOUNDS_EXCEEDED: reason = L"EXCEPTION_ARRAY_BOUNDS_EXCEEDED"; break;
+        case EXCEPTION_BREAKPOINT: reason = L"EXCEPTION_BREAKPOINT"; break;
+        case EXCEPTION_DATATYPE_MISALIGNMENT: reason = L"EXCEPTION_DATATYPE_MISALIGNMENT"; break;
+        case EXCEPTION_FLT_DIVIDE_BY_ZERO: reason = L"EXCEPTION_FLT_DIVIDE_BY_ZERO"; break;
+        case EXCEPTION_ILLEGAL_INSTRUCTION: reason = L"EXCEPTION_ILLEGAL_INSTRUCTION"; break;
+        case EXCEPTION_INT_DIVIDE_BY_ZERO: reason = L"EXCEPTION_INT_DIVIDE_BY_ZERO"; break;
+        case EXCEPTION_INVALID_HANDLE: reason = L"EXCEPTION_INVALID_HANDLE"; break;
+        case EXCEPTION_PRIV_INSTRUCTION: reason = L"EXCEPTION_PRIV_INSTRUCTION"; break;
+        case EXCEPTION_SINGLE_STEP: reason = L"EXCEPTION_SINGLE_STEP"; break;
+        case EXCEPTION_IN_PAGE_ERROR: reason = L"EXCEPTION_IN_PAGE_ERROR"; break;
+        case EXCEPTION_GUARD_PAGE: reason = L"EXCEPTION_GUARD_PAGE"; break;
+        case EXCEPTION_NONCONTINUABLE: reason = L"EXCEPTION_NONCONTINUABLE"; break;
+        case EXCEPTION_INVALID_DISPOSITION: reason = L"EXCEPTION_INVALID_DISPOSITION"; break;
+        case EXCEPTION_STACK_OVERFLOW: reason = L"EXCEPTION_STACK_OVERFLOW"; break;
+        default: {
+            WCHAR buf[64];
+            swprintf(buf, 64, L"0x%08X", ExceptionInfo->ExceptionRecord->ExceptionCode);
+            reason = buf;
+            break;
+        }
+    }
+    
+    WriteCrashDump(reason, std::wstring(modulePath), ExceptionInfo);
+    
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+void WriteCrashDump(const std::wstring& reason, const std::wstring& modulePath, struct _EXCEPTION_POINTERS* ExceptionInfo) {
+    std::wstring dumpPath = modulePath;
+    size_t pos = dumpPath.find_last_of(L'.');
+    if (pos != std::wstring::npos) {
+        dumpPath = dumpPath.substr(0, pos) + L"_crash.txt";
+    } else {
+        dumpPath = dumpPath + L"_crash.txt";
+    }
+    
+    std::wofstream file;
+    file.open(dumpPath.c_str());
+    if (file) {
+        file << L"ArchiFlow Crash Report\n";
+        file << L"======================\n\n";
+        file << L"Reason: " << reason << L"\n\n";
+        
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        file << L"Time: " << st.wDay << L"." << st.wMonth << L"." << st.wYear << L" " 
+             << st.wHour << L":" << st.wMinute << L":" << st.wSecond << L"\n\n";
+        
+        if (ExceptionInfo) {
+            CHAR buffer[1024];
+            HMODULE hModule;
+            if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          (LPCSTR)ExceptionInfo->ExceptionRecord->ExceptionAddress, &hModule) && hModule) {
+                GetModuleFileNameA(hModule, buffer, sizeof(buffer));
+                file << L"Module: " << std::wstring(buffer, buffer + strlen(buffer)) << L"\n\n";
+            }
+        }
+        
+        file << L"ArchiFlow v1.2\n";
+        file.close();
+    }
+}
 
 std::wstring formatSize(uint64_t size) {
     WCHAR buf[64];
+    if (size == 0) return L"0 B";
     if (size < 1024) swprintf(buf, 64, L"%llu B", size);
     else if (size < 1024 * 1024) swprintf(buf, 64, L"%.1f KB", size / 1024.0);
     else if (size < 1024LL * 1024 * 1024) swprintf(buf, 64, L"%.1f MB", size / (1024.0 * 1024.0));
@@ -152,9 +255,11 @@ std::wstring formatDate(time_t t) {
 }
 
 std::wstring getFileType(const std::wstring& name) {
+    if (name.empty()) return L"Файл";
     size_t pos = name.find_last_of(L'.');
     if (pos == std::wstring::npos) return L"Файл";
     std::wstring ext = name.substr(pos + 1);
+    if (ext.empty()) return L"Файл";
     for (auto& c : ext) c = towlower(c);
     if (ext == L"txt" || ext == L"rtf") return L"Текстовый документ";
     if (ext == L"pdf") return L"PDF документ";
@@ -196,18 +301,11 @@ bool loadArchiveContents(const std::wstring& archivePath) {
     
     int r = archive_read_open_filename(a, ap.c_str(), 10240);
     if (r != ARCHIVE_OK) {
-        WCHAR msg[512];
-        swprintf(msg, 512, L"Ошибка открытия архива:\n%s\n\nКод: %d\n%s", 
-            archivePath.c_str(), r, 
-            archive_error_string(a) ? 
-                std::wstring(archive_error_string(a), archive_error_string(a) + strlen(archive_error_string(a))).c_str() 
-                : L"нет описания");
-        MessageBoxW(NULL, msg, L"Ошибка", MB_OK);
         archive_read_free(a);
         return false;
     }
     
-    archiveFiles.clear();
+    app.archiveFiles.clear();
     struct archive_entry* entry;
     int fileCount = 0;
     
@@ -217,7 +315,7 @@ bool loadArchiveContents(const std::wstring& archivePath) {
         if (r != ARCHIVE_OK) { 
             archive_read_close(a); 
             archive_read_free(a); 
-            archiveFiles.clear();
+            app.archiveFiles.clear();
             return false; 
         }
         
@@ -228,63 +326,64 @@ bool loadArchiveContents(const std::wstring& archivePath) {
         } else {
             info.name = L"<unknown>";
         }
-        info.size = archive_entry_size(entry);
-        info.packedSize = 0;
+        
+        la_int64_t fileSize = archive_entry_size(entry);
+        info.packedSize = (fileSize > 0) ? static_cast<uint64_t>(fileSize) : 0;
+        info.size = (fileSize > 0) ? static_cast<uint64_t>(fileSize) : 0;
         info.mtime = archive_entry_mtime(entry);
         info.type = getFileType(info.name);
-        archiveFiles.push_back(info);
+        app.archiveFiles.push_back(info);
         fileCount++;
     }
     
     archive_read_close(a);
     archive_read_free(a);
     
-    WCHAR msg[256];
-    swprintf(msg, 256, L"Загружено файлов: %d", fileCount);
-    // Закомментируйте эту строку после проверки:
-    // MessageBoxW(NULL, msg, L"Отладка", MB_OK);
-    
     return true;
 }
 
 void refreshFileList() {
-    ListView_DeleteAllItems(hListView);
+    if (!app.hListView) return;
     
-    for (size_t i = 0; i < archiveFiles.size(); i++) {
+    ListView_DeleteAllItems(app.hListView);
+    
+    if (app.archiveFiles.empty()) return;
+    
+    for (size_t i = 0; i < app.archiveFiles.size(); i++) {
         LVITEMW item = {0};
         item.mask = LVIF_TEXT;
-        item.iItem = i;
+        item.iItem = static_cast<int>(i);
         item.iSubItem = 0;
-        item.pszText = (LPWSTR)archiveFiles[i].name.c_str();
-        ListView_InsertItem(hListView, &item);
+        item.pszText = const_cast<LPWSTR>(app.archiveFiles[i].name.c_str());
+        if (ListView_InsertItem(app.hListView, &item) == -1) continue;
         
-        std::wstring sizeStr = formatSize(archiveFiles[i].size);
-        ListView_SetItemText(hListView, i, 1, (LPWSTR)sizeStr.c_str());
+        std::wstring sizeStr = formatSize(app.archiveFiles[i].size);
+        ListView_SetItemText(app.hListView, static_cast<int>(i), 1, const_cast<LPWSTR>(sizeStr.c_str()));
         
-        std::wstring packedStr = formatSize(archiveFiles[i].packedSize);
-        ListView_SetItemText(hListView, i, 2, (LPWSTR)packedStr.c_str());
+        std::wstring packedStr = formatSize(app.archiveFiles[i].packedSize);
+        ListView_SetItemText(app.hListView, static_cast<int>(i), 2, const_cast<LPWSTR>(packedStr.c_str()));
         
         WCHAR ratioBuf[32];
-        if (archiveFiles[i].size > 0 && archiveFiles[i].packedSize > 0) {
-            swprintf(ratioBuf, 32, L"%.0f%%", 100.0 - (archiveFiles[i].packedSize * 100.0 / archiveFiles[i].size));
+        if (app.archiveFiles[i].size > 0 && app.archiveFiles[i].packedSize > 0) {
+            swprintf(ratioBuf, 32, L"%.0f%%", 100.0 - (app.archiveFiles[i].packedSize * 100.0 / app.archiveFiles[i].size));
         } else {
             wcscpy(ratioBuf, L"-");
         }
-        ListView_SetItemText(hListView, i, 3, ratioBuf);
+        ListView_SetItemText(app.hListView, static_cast<int>(i), 3, ratioBuf);
         
-        std::wstring dateStr = formatDate(archiveFiles[i].mtime);
-        ListView_SetItemText(hListView, i, 4, (LPWSTR)dateStr.c_str());
+        std::wstring dateStr = formatDate(app.archiveFiles[i].mtime);
+        ListView_SetItemText(app.hListView, static_cast<int>(i), 4, const_cast<LPWSTR>(dateStr.c_str()));
         
-        ListView_SetItemText(hListView, i, 5, (LPWSTR)archiveFiles[i].type.c_str());
+        ListView_SetItemText(app.hListView, static_cast<int>(i), 5, const_cast<LPWSTR>(app.archiveFiles[i].type.c_str()));
     }
     
     WCHAR statusText[256];
-    swprintf(statusText, 256, L"%zu %s", archiveFiles.size(), ls(L"filesInArchive").c_str());
-    SendMessageW(hStatusBar, SB_SETTEXT, 0, (LPARAM)statusText);
+    swprintf(statusText, 256, L"%zu %s", app.archiveFiles.size(), ls(L"filesInArchive").c_str());
+    if (app.hStatusBar) SendMessageW(app.hStatusBar, SB_SETTEXT, 0, (LPARAM)statusText);
 }
 
 bool extractZipArchive(const std::wstring& zipFile, const std::wstring& outDir,
-                       const std::vector<int>& selectedIndices = {}) {
+                        const std::vector<int>& selectedIndices = {}) {
     struct archive* a = archive_read_new();
     archive_read_support_format_zip(a);
     
@@ -305,13 +404,16 @@ bool extractZipArchive(const std::wstring& zipFile, const std::wstring& outDir,
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
         bool extract = selectedIndices.empty();
         if (!extract) {
-            for (int idx : selectedIndices) {
-                if (idx == fileIndex) { extract = true; break; }
+            if (std::find(selectedIndices.begin(), selectedIndices.end(), fileIndex) != selectedIndices.end()) {
+                extract = true;
             }
         }
         
         if (extract) {
-            std::string en(archive_entry_pathname(entry));
+            const char* pathname = archive_entry_pathname(entry);
+            if (!pathname) { fileIndex++; continue; }
+            
+            std::string en(pathname);
             std::string fp = od + "\\" + en;
             archive_entry_set_pathname(entry, fp.c_str());
             
@@ -337,7 +439,7 @@ bool extractZipArchive(const std::wstring& zipFile, const std::wstring& outDir,
 
 std::wstring saveZipDialog(HWND hwnd) {
     OPENFILENAMEW ofn = {0};
-    WCHAR file[512] = L"archive.zip";
+    WCHAR file[512] = L"archiflow.zip";
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
     ofn.lpstrFile = file;
@@ -385,7 +487,7 @@ std::wstring openArchiveDialog(HWND hwnd) {
     ofn.lpstrFile = file;
     ofn.nMaxFile = 512;
     ofn.lpstrFilter = L"Архивы (*.zip;*.7z;*.rar;*.tar;*.gz)\0*.zip;*.7z;*.rar;*.tar;*.gz\0Все файлы (*.*)\0*.*\0";
-    ofn.lpstrTitle = L"Открыть архив";
+    ofn.lpstrTitle = ls(L"openarc").c_str();
     ofn.Flags = OFN_FILEMUSTEXIST;
     if (GetOpenFileNameW(&ofn)) return file;
     return L"";
@@ -439,129 +541,94 @@ void createMainMenu(HWND hwnd) {
 void createControls(HWND hwnd) {
     RECT rc;
     GetClientRect(hwnd, &rc);
-    int width = rc.right - rc.left;
-    int height = rc.bottom - rc.top;
     
-    hListView = CreateWindowW(WC_LISTVIEWW, L"",
+    app.hListView = CreateWindowW(WC_LISTVIEWW, L"",
         WS_CHILD | WS_VISIBLE | WS_BORDER | LVS_REPORT | LVS_EDITLABELS | LVS_SINGLESEL,
-        5, 5, width - 10, height - 65,
-        hwnd, (HMENU)IDC_FILE_LIST, hInst, NULL);
+        5, 5, rc.right - rc.left - 10, rc.bottom - rc.top - 65,
+        hwnd, (HMENU)IDC_FILE_LIST, app.hInst, NULL);
     
-    ListView_SetExtendedListViewStyle(hListView, 
+    ListView_SetExtendedListViewStyle(app.hListView, 
         LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
     
     LVCOLUMNW lvc = {0};
     lvc.mask = LVCF_TEXT | LVCF_WIDTH;
     
-    lvc.cx = 300; lvc.pszText = (LPWSTR)ls(L"nameCol").c_str();
-    ListView_InsertColumn(hListView, 0, &lvc);
-    lvc.cx = 100; lvc.pszText = (LPWSTR)ls(L"sizeCol").c_str();
-    ListView_InsertColumn(hListView, 1, &lvc);
-    lvc.cx = 100; lvc.pszText = (LPWSTR)ls(L"packedCol").c_str();
-    ListView_InsertColumn(hListView, 2, &lvc);
-    lvc.cx = 60; lvc.pszText = (LPWSTR)ls(L"ratioCol").c_str();
-    ListView_InsertColumn(hListView, 3, &lvc);
-    lvc.cx = 140; lvc.pszText = (LPWSTR)ls(L"dateCol").c_str();
-    ListView_InsertColumn(hListView, 4, &lvc);
-    lvc.cx = 195; lvc.pszText = (LPWSTR)ls(L"typeCol").c_str();
-    ListView_InsertColumn(hListView, 5, &lvc);
+    lvc.cx = 300; lvc.pszText = const_cast<LPWSTR>(ls(L"nameCol").c_str());
+    ListView_InsertColumn(app.hListView, 0, &lvc);
+    lvc.cx = 100; lvc.pszText = const_cast<LPWSTR>(ls(L"sizeCol").c_str());
+    ListView_InsertColumn(app.hListView, 1, &lvc);
+    lvc.cx = 100; lvc.pszText = const_cast<LPWSTR>(ls(L"packedCol").c_str());
+    ListView_InsertColumn(app.hListView, 2, &lvc);
+    lvc.cx = 60; lvc.pszText = const_cast<LPWSTR>(ls(L"ratioCol").c_str());
+    ListView_InsertColumn(app.hListView, 3, &lvc);
+    lvc.cx = 140; lvc.pszText = const_cast<LPWSTR>(ls(L"dateCol").c_str());
+    ListView_InsertColumn(app.hListView, 4, &lvc);
+    lvc.cx = 195; lvc.pszText = const_cast<LPWSTR>(ls(L"typeCol").c_str());
+    ListView_InsertColumn(app.hListView, 5, &lvc);
     
-    int btnY = height - 55;
-    hAddBtn = CreateWindowW(L"BUTTON", L"+ Добавить",
+    int btnY = rc.bottom - rc.top - 55;
+    app.hAddBtn = CreateWindowW(L"BUTTON", L"+ Добавить",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        5, btnY, 110, 25, hwnd, (HMENU)IDC_ADD_BTN, hInst, NULL);
+        5, btnY, 110, 25, hwnd, (HMENU)IDC_ADD_BTN, app.hInst, NULL);
     
-    hExtractBtn = CreateWindowW(L"BUTTON", L"Извлечь",
+    app.hExtractBtn = CreateWindowW(L"BUTTON", L"Извлечь",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        120, btnY, 110, 25, hwnd, (HMENU)IDC_EXTRACT_BTN, hInst, NULL);
+        120, btnY, 110, 25, hwnd, (HMENU)IDC_EXTRACT_BTN, app.hInst, NULL);
     
-    hDeleteBtn = CreateWindowW(L"BUTTON", L"Удалить",
+    app.hDeleteBtn = CreateWindowW(L"BUTTON", L"Удалить",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        235, btnY, 110, 25, hwnd, (HMENU)IDC_DELETE_BTN, hInst, NULL);
+        235, btnY, 110, 25, hwnd, (HMENU)IDC_DELETE_BTN, app.hInst, NULL);
     
-    hStatusBar = CreateWindowW(STATUSCLASSNAMEW, L"",
+    app.hOpenBtn = CreateWindowW(L"BUTTON", L"Открыть",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        350, btnY, 110, 25, hwnd, (HMENU)IDC_OPEN_BTN, app.hInst, NULL);
+    
+    app.hStatusBar = CreateWindowW(STATUSCLASSNAMEW, L"",
         WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP,
-        0, 0, 0, 0, hwnd, (HMENU)IDC_STATUS_BAR, hInst, NULL);
+        0, 0, 0, 0, hwnd, (HMENU)IDC_STATUS_BAR, app.hInst, NULL);
     
-    int statusWidths[] = {width - 200, -1};
-    SendMessageW(hStatusBar, SB_SETPARTS, 2, (LPARAM)statusWidths);
-    SendMessageW(hStatusBar, SB_SETTEXT, 0, (LPARAM)ls(L"ready").c_str());
+    int statusWidths[] = {rc.right - rc.left - 200, -1};
+    SendMessageW(app.hStatusBar, SB_SETPARTS, 2, (LPARAM)statusWidths);
+    SendMessageW(app.hStatusBar, SB_SETTEXT, 0, (LPARAM)ls(L"ready").c_str());
 }
 
 void updateUI() {
-    createMainMenu(hMainWnd);
-    DrawMenuBar(hMainWnd);
+    createMainMenu(app.hMainWnd);
+    DrawMenuBar(app.hMainWnd);
     
     LVCOLUMNW lvc = {0};
     lvc.mask = LVCF_TEXT;
-    lvc.pszText = (LPWSTR)ls(L"nameCol").c_str();
-    ListView_SetColumn(hListView, 0, &lvc);
-    lvc.pszText = (LPWSTR)ls(L"sizeCol").c_str();
-    ListView_SetColumn(hListView, 1, &lvc);
-    lvc.pszText = (LPWSTR)ls(L"packedCol").c_str();
-    ListView_SetColumn(hListView, 2, &lvc);
-    lvc.pszText = (LPWSTR)ls(L"ratioCol").c_str();
-    ListView_SetColumn(hListView, 3, &lvc);
-    lvc.pszText = (LPWSTR)ls(L"dateCol").c_str();
-    ListView_SetColumn(hListView, 4, &lvc);
-    lvc.pszText = (LPWSTR)ls(L"typeCol").c_str();
-    ListView_SetColumn(hListView, 5, &lvc);
+    lvc.pszText = const_cast<LPWSTR>(ls(L"nameCol").c_str());
+    ListView_SetColumn(app.hListView, 0, &lvc);
+    lvc.pszText = const_cast<LPWSTR>(ls(L"sizeCol").c_str());
+    ListView_SetColumn(app.hListView, 1, &lvc);
+    lvc.pszText = const_cast<LPWSTR>(ls(L"packedCol").c_str());
+    ListView_SetColumn(app.hListView, 2, &lvc);
+    lvc.pszText = const_cast<LPWSTR>(ls(L"ratioCol").c_str());
+    ListView_SetColumn(app.hListView, 3, &lvc);
+    lvc.pszText = const_cast<LPWSTR>(ls(L"dateCol").c_str());
+    ListView_SetColumn(app.hListView, 4, &lvc);
+    lvc.pszText = const_cast<LPWSTR>(ls(L"typeCol").c_str());
+    ListView_SetColumn(app.hListView, 5, &lvc);
 }
 
 // Добавление файлов в существующий архив
 bool addFilesToExistingArchive(const std::wstring& zipPath, const std::vector<std::wstring>& newFiles) {
+    // Извлекаем архив во временную папку
     WCHAR tempPath[MAX_PATH];
     GetTempPathW(MAX_PATH, tempPath);
     std::wstring tempDir = std::wstring(tempPath) + L"ArchiFlow_Add\\";
-    CreateDirectoryW(tempDir.c_str(), NULL);
-
-    struct archive* a = archive_read_new();
-    archive_read_support_format_all(a);
-    archive_read_support_filter_all(a);
-
-    std::string ap(zipPath.begin(), zipPath.end());
-    if (archive_read_open_filename(a, ap.c_str(), 10240) != ARCHIVE_OK) {
-        archive_read_free(a);
+    if (!CreateDirectoryW(tempDir.c_str(), NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        return false;
+    }
+    
+    // Используем существующую функцию extractZipArchive
+    if (!extractZipArchive(zipPath, tempDir)) {
         RemoveDirectoryW(tempDir.c_str());
         return false;
     }
-
-    struct archive* ext = archive_write_disk_new();
-    archive_write_disk_set_options(ext, ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL);
-    archive_write_disk_set_standard_lookup(ext);
-
-    struct archive_entry* entry;
-    while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
-        const char* pathname = archive_entry_pathname(entry);
-        if (!pathname) continue;
-
-        // Приводим путь к Windows (обратные слеши)
-        std::string cleanPath = pathname;
-        for (char& c : cleanPath) if (c == '/') c = '\\';
-
-        std::string fullPath = std::string(tempDir.begin(), tempDir.end()) + cleanPath;
-        archive_entry_set_pathname(entry, fullPath.c_str());
-
-        // Создаём подпапки при необходимости
-        std::string dirPart = fullPath.substr(0, fullPath.find_last_of('\\'));
-        if (!dirPart.empty()) {
-            std::wstring wdir(dirPart.begin(), dirPart.end());
-            SHCreateDirectoryExW(NULL, wdir.c_str(), NULL);
-        }
-
-        archive_write_header(ext, entry);
-        const void* buff;
-        size_t size;
-        la_int64_t offset;
-        while (archive_read_data_block(a, &buff, &size, &offset) == ARCHIVE_OK)
-            archive_write_data_block(ext, buff, size, offset);
-    }
-
-    archive_read_close(a);
-    archive_read_free(a);
-    archive_write_close(ext);
-    archive_write_free(ext);
-
+    
+    // Копируем новые файлы во временную папку
     for (const auto& f : newFiles) {
         DWORD attrs = GetFileAttributesW(f.c_str());
         if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) continue;
@@ -569,9 +636,10 @@ bool addFilesToExistingArchive(const std::wstring& zipPath, const std::vector<st
         std::wstring name = (pos != std::wstring::npos) ? f.substr(pos + 1) : f;
         CopyFileW(f.c_str(), (tempDir + name).c_str(), FALSE);
     }
-
+    
+    // Собираем все файлы из tempDir
     std::vector<std::wstring> allFiles, relativePaths;
-
+    
     std::function<void(const std::wstring&)> collect = [&](const std::wstring& dir) {
         WIN32_FIND_DATAW fd;
         HANDLE hFind = FindFirstFileW((dir + L"*").c_str(), &fd);
@@ -592,50 +660,58 @@ bool addFilesToExistingArchive(const std::wstring& zipPath, const std::vector<st
         }
     };
     collect(tempDir);
-
+    
     if (allFiles.empty()) {
         RemoveDirectoryW(tempDir.c_str());
         return false;
     }
-
+    
+    // Удаляем старый архив
     DeleteFileW(zipPath.c_str());
-
+    
+    // Создаем новый архив
     struct archive* out = archive_write_new();
     archive_write_set_format_zip(out);
-
+    
     std::string outPath(zipPath.begin(), zipPath.end());
     if (archive_write_open_filename(out, outPath.c_str()) != ARCHIVE_OK) {
         archive_write_free(out);
+        RemoveDirectoryW(tempDir.c_str());
         return false;
     }
-
+    
     for (size_t i = 0; i < allFiles.size(); ++i) {
         struct archive* disk = archive_read_disk_new();
         archive_read_disk_set_standard_lookup(disk);
         struct archive_entry* newEntry = archive_entry_new();
-
+        
         std::string fs(allFiles[i].begin(), allFiles[i].end());
         std::string rel(relativePaths[i].begin(), relativePaths[i].end());
-        for (char& c : rel) if (c == '\\') c = '/';   // в ZIP используем прямые слеши
-
+        for (char& c : rel) if (c == '\\') c = '/';
+        
         archive_entry_copy_pathname(newEntry, rel.c_str());
         archive_read_disk_entry_from_file(disk, newEntry, -1, 0);
         archive_write_header(out, newEntry);
-
+        
         std::ifstream in(fs, std::ios::binary);
         if (in) {
             char buf[8192];
-            while (in.read(buf, sizeof(buf)) || in.gcount() > 0)
+            while (in.read(buf, sizeof(buf))) {
                 archive_write_data(out, buf, in.gcount());
+            }
+            if (in.gcount() > 0) {
+                archive_write_data(out, buf, in.gcount());
+            }
         }
-
+        
         archive_entry_free(newEntry);
         archive_read_free(disk);
     }
-
+    
     archive_write_close(out);
     archive_write_free(out);
-
+    
+    // Удаляем временную папку
     std::function<void(const std::wstring&)> removeDir = [&](const std::wstring& dir) {
         WIN32_FIND_DATAW fd;
         HANDLE hFind = FindFirstFileW((dir + L"*").c_str(), &fd);
@@ -655,7 +731,7 @@ bool addFilesToExistingArchive(const std::wstring& zipPath, const std::vector<st
         RemoveDirectoryW(dir.c_str());
     };
     removeDir(tempDir);
-
+    
     return true;
 }
 
@@ -712,24 +788,27 @@ bool createZipArchive(const std::wstring& zipFile, const std::vector<std::wstrin
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CREATE:
-            hMainWnd = hwnd;
+            app.hMainWnd = hwnd;
             initLoc();
             createMainMenu(hwnd);
             createControls(hwnd);
             break;
         
         case WM_SIZE: {
+            if (!app.hListView || !app.hAddBtn || !app.hExtractBtn || !app.hDeleteBtn || !app.hOpenBtn) break;
+            
             RECT rc;
             GetClientRect(hwnd, &rc);
             int width = rc.right - rc.left;
             int height = rc.bottom - rc.top;
             
-            SetWindowPos(hListView, NULL, 5, 5, width - 10, height - 65, SWP_NOZORDER);
-            SetWindowPos(hAddBtn, NULL, 5, height - 55, 110, 25, SWP_NOZORDER);
-            SetWindowPos(hExtractBtn, NULL, 120, height - 55, 110, 25, SWP_NOZORDER);
-            SetWindowPos(hDeleteBtn, NULL, 235, height - 55, 110, 25, SWP_NOZORDER);
+            SetWindowPos(app.hListView, NULL, 5, 5, width - 10, height - 65, SWP_NOZORDER);
+            SetWindowPos(app.hAddBtn, NULL, 5, height - 55, 110, 25, SWP_NOZORDER);
+            SetWindowPos(app.hExtractBtn, NULL, 120, height - 55, 110, 25, SWP_NOZORDER);
+            SetWindowPos(app.hDeleteBtn, NULL, 235, height - 55, 110, 25, SWP_NOZORDER);
+            SetWindowPos(app.hOpenBtn, NULL, 350, height - 55, 110, 25, SWP_NOZORDER);
             
-            SendMessageW(hStatusBar, WM_SIZE, 0, 0);
+            SendMessageW(app.hStatusBar, WM_SIZE, 0, 0);
             break;
         }
         
@@ -739,14 +818,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     curLang = APP_LANG_RUSSIAN;
                     updateUI();
                     SetWindowTextW(hwnd, ls(L"title").c_str());
-                    if (archiveLoaded) refreshFileList();
+                    if (app.archiveLoaded) refreshFileList();
                     break;
                     
                 case IDM_LANGUAGE_EN:
                     curLang = APP_LANG_ENGLISH;
                     updateUI();
                     SetWindowTextW(hwnd, ls(L"title").c_str());
-                    if (archiveLoaded) refreshFileList();
+                    if (app.archiveLoaded) refreshFileList();
                     break;
                 
                 case IDM_NEW_ARCHIVE: {
@@ -754,11 +833,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (!zip.empty()) {
                         auto files = openFilesDialog(hwnd);
                         if (!files.empty() && createZipArchive(zip, files)) {
-                            currentArchivePath = zip;
-                            archiveLoaded = true;
+                            app.currentArchivePath = zip;
+                            app.archiveLoaded = true;
                             loadArchiveContents(zip);
                             refreshFileList();
-                            SetWindowTextW(hwnd, (L"ArchiFlow - " + currentArchivePath).c_str());
+                            SetWindowTextW(hwnd, (L"ArchiFlow - " + app.currentArchivePath).c_str());
                         }
                     }
                     break;
@@ -768,10 +847,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     std::wstring zip = openArchiveDialog(hwnd);
                     if (!zip.empty()) {
                         if (loadArchiveContents(zip)) {
-                            currentArchivePath = zip;
-                            archiveLoaded = true;
+                            app.currentArchivePath = zip;
+                            app.archiveLoaded = true;
                             refreshFileList();
-                            SetWindowTextW(hwnd, (L"ArchiFlow - " + currentArchivePath).c_str());
+                            SetWindowTextW(hwnd, (L"ArchiFlow - " + app.currentArchivePath).c_str());
                         }
                     }
                     break;
@@ -779,9 +858,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 
                 case IDM_EXTRACT_ALL:
                 case IDC_EXTRACT_BTN: {
-                    if (archiveLoaded) {
+                    if (app.archiveLoaded) {
                         std::wstring dir = selectFolderDialog(hwnd);
-                        if (!dir.empty() && extractZipArchive(currentArchivePath, dir)) {
+                        if (!dir.empty() && extractZipArchive(app.currentArchivePath, dir)) {
                             MessageBoxW(hwnd, ls(L"done").c_str(), L"ArchiFlow", MB_OK);
                         }
                     }
@@ -789,58 +868,65 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 }
                 
                 case IDM_EXTRACT_SEL: {
-                    if (archiveLoaded) {
+                    if (app.archiveLoaded) {
                         std::wstring dir = selectFolderDialog(hwnd);
                         if (!dir.empty()) {
                             std::vector<int> selected;
-                            int count = ListView_GetItemCount(hListView);
+                            int count = ListView_GetItemCount(app.hListView);
                             for (int i = 0; i < count; i++) {
-                                if (ListView_GetItemState(hListView, i, LVIS_SELECTED) & LVIS_SELECTED)
+                                if (ListView_GetItemState(app.hListView, i, LVIS_SELECTED) & LVIS_SELECTED)
                                     selected.push_back(i);
                             }
-                            if (!selected.empty() && extractZipArchive(currentArchivePath, dir, selected))
+                            if (!selected.empty() && extractZipArchive(app.currentArchivePath, dir, selected))
                                 MessageBoxW(hwnd, ls(L"done").c_str(), L"ArchiFlow", MB_OK);
                         }
                     }
                     break;
                 }
                 
-                case IDC_ADD_BTN: {
-                    if (archiveLoaded) {
-                        // Проверяем, наш ли это архив (простой признак – отсутствие подпапок в корне)
-                        bool hasSubdirs = false;
-                        for (const auto& f : archiveFiles) {
-                            if (f.name.find(L'/') != std::wstring::npos || f.name.find(L'\\') != std::wstring::npos) {
-                                hasSubdirs = true;
-                                break;
+                case IDC_ADD_BTN:
+                case IDM_ADD_FILES: {
+                    if (app.archiveLoaded) {
+                        auto files = openFilesDialog(hwnd);
+                        if (!files.empty()) {
+                            if (addFilesToExistingArchive(app.currentArchivePath, files)) {
+                                loadArchiveContents(app.currentArchivePath);
+                                MessageBoxW(hwnd, ls(L"done").c_str(), L"ArchiFlow", MB_OK);
+                            } else {
+                                MessageBoxW(hwnd, L"Ошибка добавления файлов.", L"ArchiFlow", MB_OK | MB_ICONERROR);
                             }
                         }
-                        if (hasSubdirs) {
-                            MessageBoxW(hwnd, L"Добавление файлов в этот архив недоступно.\n"
-                                            L"Архив содержит вложенные папки или создан другой программой.\n"
-                                            L"Рекомендуется извлечь архив, добавить файлы и создать новый.\n"
-                                            L"Звучит как анегдот, но, пока что, это лучшее решение для ArchiFlow!",
-                                            L"ArchiFlow", MB_OK | MB_ICONINFORMATION);
-                        } else {
+                    } else {
+                        std::wstring zip = saveZipDialog(hwnd);
+                        if (!zip.empty()) {
                             auto files = openFilesDialog(hwnd);
-                            if (!files.empty()) {
-                                HCURSOR oldCursor = SetCursor(LoadCursor(NULL, IDC_WAIT));
-                                if (addFilesToExistingArchive(currentArchivePath, files)) {
-                                    loadArchiveContents(currentArchivePath);
-                                    refreshFileList();
-                                    MessageBoxW(hwnd, L"Файлы добавлены!", L"ArchiFlow", MB_OK);
-                                } else {
-                                    MessageBoxW(hwnd, L"Ошибка при добавлении файлов!", L"ArchiFlow", MB_OK | MB_ICONERROR);
-                                }
-                                SetCursor(oldCursor);
+                            if (!files.empty() && createZipArchive(zip, files)) {
+                                app.currentArchivePath = zip;
+                                app.archiveLoaded = true;
+                                loadArchiveContents(zip);
+                                refreshFileList();
+                                SetWindowTextW(hwnd, (L"ArchiFlow - " + app.currentArchivePath).c_str());
                             }
                         }
-                    }
-                    break;
-                }
-                
-                case IDM_ABOUT:
-                    MessageBoxW(hwnd, L"ArchiFlow v1.0\nЛегкий архиватор\n\nZIP, 7Z, RAR, TAR\n\nlibarchive\n2024",
+                     }
+                     break;
+                 }
+                 
+                 case IDC_OPEN_BTN: {
+                     std::wstring zip = openArchiveDialog(hwnd);
+                     if (!zip.empty()) {
+                         if (loadArchiveContents(zip)) {
+                             app.currentArchivePath = zip;
+                             app.archiveLoaded = true;
+                             refreshFileList();
+                             SetWindowTextW(hwnd, (L"ArchiFlow - " + app.currentArchivePath).c_str());
+                         }
+                     }
+                     break;
+                 }
+                 
+                 case IDM_ABOUT:
+                    MessageBoxW(hwnd, L"ArchiFlow v.1.2\nСоздан K1sh-M1sh\nЛегковесный архиватор\n\nЛицензия: MIT",
                         L"О программе", MB_OK | MB_ICONINFORMATION);
                     break;
                 
@@ -853,12 +939,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_NOTIFY: {
             NMHDR* nmhdr = (NMHDR*)lp;
             if (nmhdr->idFrom == IDC_FILE_LIST && nmhdr->code == NM_DBLCLK) {
-                int sel = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-                if (sel >= 0 && archiveLoaded) {
+                int sel = ListView_GetNextItem(app.hListView, -1, LVNI_SELECTED);
+                if (sel >= 0 && app.archiveLoaded) {
                     std::wstring dir = selectFolderDialog(hwnd);
                     if (!dir.empty()) {
                         std::vector<int> selected = {sel};
-                        if (extractZipArchive(currentArchivePath, dir, selected))
+                        if (extractZipArchive(app.currentArchivePath, dir, selected))
                             MessageBoxW(hwnd, ls(L"done").c_str(), L"ArchiFlow", MB_OK);
                     }
                 }
@@ -866,24 +952,60 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             break;
         }
 
-                case WM_USER + 100: {
-            // Отложенная загрузка файла
-            WCHAR path[MAX_PATH];
-            GetWindowTextW(hwnd, path, MAX_PATH);
-            
-            if (wcslen(path) > 0 && wcscmp(path, L"ArchiFlow - Архиватор") != 0 && wcscmp(path, L"ArchiFlow - Archiver") != 0) {
-                DWORD attrs = GetFileAttributesW(path);
-                if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-                    if (loadArchiveContents(path)) {
-                        currentArchivePath = path;
-                        archiveLoaded = true;
-                        refreshFileList();
-                        SetWindowTextW(hwnd, (L"ArchiFlow - " + currentArchivePath).c_str());
-                    } else {
-                        SetWindowTextW(hwnd, ls(L"title").c_str());
+                case WM_DROPFILES: {
+            HDROP hDrop = (HDROP)wp;
+            if (hDrop) {
+                UINT fileCount = DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0);
+                std::vector<std::wstring> files;
+                
+                for (UINT i = 0; i < fileCount; i++) {
+                    UINT len = DragQueryFileW(hDrop, i, NULL, 0) + 1;
+                    WCHAR* buf = (WCHAR*)GlobalAlloc(GPTR, len * sizeof(WCHAR));
+                    if (buf) {
+                        DragQueryFileW(hDrop, i, buf, len);
+                        files.push_back(buf);
+                        GlobalFree(buf);
                     }
-                } else {
-                    SetWindowTextW(hwnd, ls(L"title").c_str());
+                }
+                
+                if (!files.empty()) {
+                    // Создаем архив с перетащенными файлами
+                    std::wstring zipPath = saveZipDialog(hwnd);
+                    if (!zipPath.empty()) {
+                        if (createZipArchive(zipPath, files)) {
+                            app.currentArchivePath = zipPath;
+                            app.archiveLoaded = true;
+                            loadArchiveContents(zipPath);
+                            refreshFileList();
+                            SetWindowTextW(hwnd, (L"ArchiFlow - " + app.currentArchivePath).c_str());
+                        }
+                    }
+                }
+                
+                DragFinish(hDrop);
+            }
+            break;
+        }
+
+                case WM_USER + 100: {
+            if (!app.hListView) break;
+            
+            LPWSTR pathCopy = (LPWSTR)lp;
+            if (pathCopy) {
+                std::wstring path(pathCopy);
+                GlobalFree(pathCopy);
+                
+                // Создаем архив с перетащенными файлами
+                std::vector<std::wstring> files = {path};
+                std::wstring zipPath = saveZipDialog(hwnd);
+                if (!zipPath.empty()) {
+                    if (createZipArchive(zipPath, files)) {
+                        app.currentArchivePath = zipPath;
+                        app.archiveLoaded = true;
+                        loadArchiveContents(zipPath);
+                        refreshFileList();
+                        SetWindowTextW(hwnd, (L"ArchiFlow - " + app.currentArchivePath).c_str());
+                    }
                 }
             }
             break;
@@ -900,22 +1022,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show) {
-    hInst = hi;
+    app.hInst = hi;
     
     INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_WIN95_CLASSES | ICC_BAR_CLASSES };
     InitCommonControlsEx(&icex);
-    
-    // Получаем аргументы ДО создания окна
-    LPWSTR* argv;
-    int argc;
-    argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    
-    std::wstring debugMsg = L"Argc: " + std::to_wstring(argc) + L"\n";
-    if (argv) {
-        for (int i = 0; i < argc; i++) {
-            debugMsg += L"argv[" + std::to_wstring(i) + L"]: " + argv[i] + L"\n";
-        }
-    }
     
     // Регистрируем класс
     WNDCLASSEXW wc = { sizeof(wc) };
@@ -940,22 +1050,34 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show) {
     ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
     
-    // Отложенная загрузка файла через сообщение
+    // Включаем Drag&Drop
+    DragAcceptFiles(hwnd, TRUE);
+    
+    // Получаем аргументы
+    LPWSTR* argv;
+    int argc;
+    argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    
+    // Открываем файл (один файл через аргумент)
     if (argv && argc > 1) {
-        std::wstring filePath;
         for (int i = 1; i < argc; i++) {
             std::wstring arg(argv[i]);
-            if (arg != L"-a" && arg != L"-x") filePath = arg;
-        }
-        
-        while (!filePath.empty() && filePath[0] == L'"') filePath = filePath.substr(1);
-        while (!filePath.empty() && filePath.back() == L'"') filePath.pop_back();
-        
-        if (!filePath.empty()) {
-            // Отправляем путь к файлу через SetWindowLongPtr + PostMessage
-            // Проще: сохраняем в глобальную переменную и используем таймер
-            SetWindowTextW(hwnd, filePath.c_str()); // Временно сохраняем путь в заголовке
-            PostMessage(hwnd, WM_USER + 100, 0, 0); // Сигнал для загрузки
+            
+            while (!arg.empty() && arg[0] == L'"') arg = arg.substr(1);
+            while (!arg.empty() && arg.back() == L'"') arg.pop_back();
+            
+            if (arg.empty()) continue;
+            
+            DWORD attrs = GetFileAttributesW(arg.c_str());
+            if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+                LPWSTR pathCopy = (LPWSTR)GlobalAlloc(GPTR, (arg.length() + 1) * sizeof(WCHAR));
+                if (pathCopy) {
+                    wcscpy(pathCopy, arg.c_str());
+                    SetWindowTextW(hwnd, arg.c_str());
+                    PostMessage(hwnd, WM_USER + 100, 0, (LPARAM)pathCopy);
+                }
+                break;
+            }
         }
     }
     

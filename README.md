@@ -1,5 +1,3 @@
-# README.md - Project documentation
-
 # ArchiFlow - Легкий архиватор
 
 ## Описание
